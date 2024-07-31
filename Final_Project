@@ -1,0 +1,316 @@
+pip install feature-engine
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from feature_engine.imputation import MeanMedianImputer, CategoricalImputer
+from feature_engine.encoding import OneHotEncoder
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score, accuracy_score, roc_curve
+import warnings
+warnings.filterwarnings('ignore')
+plt.style.use('bmh')
+sns.set_palette('Paired')
+pd.set_option('display.max_rows', 20)
+pd.set_option('display.max_columns', 40)
+
+df = pd.read_csv("/kaggle/input/telco-customer-churn/WA_Fn-UseC_-Telco-Customer-Churn.csv")
+
+print(f"Dataset possui {df.shape[0]} linhas e {df.shape[1]} colunas.")
+
+print(f"O dataset possui: {len(df.select_dtypes(include = 'object').columns.to_list())} colunas categóricas.")
+print(f"O dataset possui: {len(df.select_dtypes(include = 'number').columns.to_list())} colunas numéricas.")
+
+for col in df.columns.to_list():
+    print(df[col].name)
+    print(df[col].unique())
+    print("=" * 30)
+
+df.head()
+
+df.info()
+
+df.TotalCharges = df.TotalCharges.replace(' ', np.nan)
+df.TotalCharges = df.TotalCharges.astype(float)
+df.info()
+
+df.describe().round(2).T
+
+missing = df.isnull().sum().reset_index()
+missing.rename(columns = {'index': 'Coluna', 0: 'Nulos'}, inplace = True)
+missing[missing['Nulos'] > 0]
+
+churn_proportion = df.Churn.value_counts(normalize = True).reset_index()
+churn_proportion['proportion'] = round((churn_proportion['proportion'] * 100), 2)
+churn_proportion
+
+fig, ax = plt.subplots(figsize = (12, 6))
+
+sns.barplot(churn_proportion, x = 'Churn', y = 'proportion')
+ax.set_title("Proporção de Churn", loc = 'left', fontsize = 18, pad = 12)
+ax.set_xlabel("Churn", fontsize = 8)
+ax.set_ylabel("Proporção (%)", fontsize = 8)
+plt.show()
+
+ig, ax = plt.subplots(figsize = (12, 6))
+
+sns.boxplot(df, x = 'Churn', y = 'tenure', palette='Paired')
+ax.set_title("Churn x Tempo de Relacionamento", loc = 'left', fontsize = 18, pad = 12)
+ax.set_xlabel("Churn", fontsize = 8)
+ax.set_ylabel("Tempo (Meses)", fontsize = 8)
+plt.show()
+
+fig, ax = plt.subplots(figsize = (12, 6))
+
+sns.boxplot(df, x = 'Churn', y = 'MonthlyCharges', palette='Paired')
+ax.set_title("Churn x Mensalidade", loc = 'left', fontsize = 18, pad = 12)
+ax.set_xlabel("Churn", fontsize = 8)
+ax.set_ylabel("Mensalidade (USD)", fontsize = 8)
+plt.show()
+
+fig, ax = plt.subplots(figsize = (12, 6))
+
+sns.boxplot(df, x = 'Churn', y = 'TotalCharges', palette='Paired')
+ax.set_title("Churn x Valor Total", loc = 'left', fontsize = 18, pad = 12)
+ax.set_xlabel("Churn", fontsize = 8)
+ax.set_ylabel("Valor Total (USD)", fontsize = 8)
+plt.show()
+
+contract_churn = df.groupby(['Churn', 'Contract']).agg(Contagem = ('Churn', 'count')).reset_index()
+contract_churn
+
+fig, ax = plt.subplots(figsize = (12, 6))
+
+sns.barplot(contract_churn, x = 'Contract', y = 'Contagem', hue = 'Churn')
+ax.set_title("Churn x Tipo de Contrato", loc = 'left', fontsize = 18, pad = 12)
+ax.set_xlabel("Tipo de Contrato", fontsize = 8)
+ax.set_ylabel("Contagem", fontsize = 8)
+plt.show()
+
+pay_churn = df.groupby(['PaymentMethod', 'Churn']).agg(Contagem = ('Churn', 'count')).reset_index()
+pay_churn
+
+fig, ax = plt.subplots(figsize = (12, 6))
+
+sns.barplot(pay_churn, x = 'PaymentMethod', y = 'Contagem', hue = 'Churn')
+ax.set_title("Churn x Forma de Pagamento", loc = 'left', fontsize = 18, pad = 12)
+ax.set_xlabel("Método de Pagamento", fontsize = 8)
+ax.set_ylabel("Contagem", fontsize = 8)
+plt.show()
+
+support_churn = df.groupby(['TechSupport', 'Churn']).agg(Contagem = ('Churn', 'count')).reset_index()
+support_churn
+
+
+fig, ax = plt.subplots(figsize = (12, 6))
+
+sns.barplot(support_churn, x = 'TechSupport', y = 'Contagem', hue = 'Churn')
+ax.set_title("Churn x Suporte Técnico", loc = 'left', fontsize = 18, pad = 12)
+ax.set_xlabel("Possui suporte?", fontsize = 8)
+ax.set_ylabel("Contagem", fontsize = 8)
+plt.show()
+
+le = LabelEncoder()
+df['Churn'] = le.fit_transform(df['Churn'])
+df.head()
+
+X = df.drop(columns = ['customerID', 'Churn'])
+y = df['Churn']
+
+cat_features = X.select_dtypes(include = 'object').columns.to_list()
+num_features = X.select_dtypes(include = 'number').columns.to_list()
+
+num_transformer = Pipeline([
+    ('imput_1', MeanMedianImputer(imputation_method='median'))
+])
+
+cat_transformer = Pipeline([
+    ('imput_2', CategoricalImputer(imputation_method='frequent')),
+    ('ohe', OneHotEncoder())
+])
+
+preprocessor = ColumnTransformer(
+    transformers=[
+        ('num', num_transformer, num_features),
+        ('cat', cat_transformer, cat_features)
+    ]
+)
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.20, random_state=42, stratify = y)
+
+
+print(f"Taxa de resposta em treino {y_train.mean()}")
+print(f"Taxa de resposta em teste: {y_test.mean()}")
+
+print(X_train.shape, X_test.shape, y_train.shape, y_test.shape)
+
+model = RandomForestClassifier(random_state=42)
+
+rf = Pipeline([
+    ('preprocessor', preprocessor),
+    ('model', model)
+])
+
+rf.fit(X_train, y_train)
+
+y_pred_train = rf.predict(X_train)
+y_pred_test = rf.predict(X_test)
+
+y_proba_train = rf.predict_proba(X_train)
+y_proba_test = rf.predict_proba(X_test)
+
+acc_train_rf = accuracy_score(y_train, y_pred_train)
+acc_test_rf = accuracy_score(y_test, y_pred_test)
+
+print('Acurácia')
+print('=' * 30)
+print(f'Em treino: {acc_train_rf}')
+print(f'Em teste: {acc_test_rf}')
+print(f'Diferença Treino x Teste: {acc_train_rf - acc_test_rf}')
+
+auc_train_rf = roc_auc_score(y_train, y_proba_train[:,1])
+auc_test_rf = roc_auc_score(y_test, y_proba_test[:,1])
+
+print('ROC AUC')
+print('=' * 30)
+print(f'Em treino: {auc_train_rf}')
+print(f'Em teste: {auc_test_rf}')
+print(f'Diferença Treino x Teste: {auc_train_rf - auc_test_rf}')
+
+model = RandomForestClassifier(random_state=42)
+
+params = {
+    'n_estimators': [100, 300, 500],
+    'max_depth': [10, 20, 50],
+    'min_samples_split': [2, 5, 10]
+}
+
+grid = GridSearchCV(model,
+                    param_grid=params,
+                    n_jobs=-1,
+                    cv = 5,
+                    scoring='roc_auc')
+
+rf = Pipeline([
+    ('preprocessor', preprocessor),
+    ('model', grid)
+])
+
+rf.fit(X_train, y_train)
+
+y_pred_train = rf.predict(X_train)
+y_pred_test = rf.predict(X_test)
+
+y_proba_train = rf.predict_proba(X_train)
+y_proba_test = rf.predict_proba(X_test)
+
+acc_train_rf = accuracy_score(y_train, y_pred_train)
+acc_test_rf = accuracy_score(y_test, y_pred_test)
+
+print('Acurácia')
+print('=' * 30)
+print(f'Em treino: {acc_train_rf}')
+print(f'Em teste: {acc_test_rf}')
+print(f'Diferença Treino x Teste: {acc_train_rf - acc_test_rf}')
+
+auc_train_rf = roc_auc_score(y_train, y_proba_train[:,1])
+auc_test_rf = roc_auc_score(y_test, y_proba_test[:,1])
+
+print('ROC AUC')
+print('=' * 30)
+print(f'Em treino: {auc_train_rf}')
+print(f'Em teste: {auc_test_rf}')
+print(f'Diferença Treino x Teste: {auc_train_rf - auc_test_rf}')
+
+model = LogisticRegression(random_state=42)
+
+lr = Pipeline([
+    ('preprocessor', preprocessor),
+    ('model', model)
+])
+
+lr.fit(X_train, y_train)
+
+y_pred_train = lr.predict(X_train)
+y_pred_test = lr.predict(X_test)
+
+y_proba_train = lr.predict_proba(X_train)
+y_proba_test = lr.predict_proba(X_test)
+
+acc_train_lr = accuracy_score(y_train, y_pred_train)
+acc_test_rf = accuracy_score(y_test, y_pred_test)
+
+print('Acurácia')
+print('=' * 30)
+print(f'Em treino: {acc_train_lr}')
+print(f'Em teste: {acc_test_rf}')
+print(f'Diferença Treino x Teste: {acc_train_lr - acc_test_rf}')
+
+auc_train_lr = roc_auc_score(y_train, y_proba_train[:,1])
+auc_test_lr = roc_auc_score(y_test, y_proba_test[:,1])
+
+print('ROC AUC')
+print('=' * 30)
+print(f'Em treino: {auc_train_lr}')
+print(f'Em teste: {auc_test_lr}')
+print(f'Diferença Treino x Teste: {auc_train_lr - auc_test_lr}')
+
+model = LogisticRegression(max_iter = 10000, random_state=42)
+
+params = {
+    'C': [0.001, 0.01, 1, 10, 100],
+    'penalty': ['l1', 'l2']
+}
+
+grid = GridSearchCV(model,
+                    param_grid=params,
+                    n_jobs=-1,
+                    cv=5,
+                    scoring='roc_auc')
+
+lr = Pipeline([
+    ('preprocessor', preprocessor),
+    ('model', grid)
+])
+
+lr.fit(X_train, y_train)
+
+y_pred_train = lr.predict(X_train)
+y_pred_test = lr.predict(X_test)
+
+y_proba_train = lr.predict_proba(X_train)
+y_proba_test = lr.predict_proba(X_test)
+
+acc_train_lr = accuracy_score(y_train, y_pred_train)
+acc_test_rf = accuracy_score(y_test, y_pred_test)
+
+print('Acurácia')
+print('=' * 30)
+print(f'Em treino: {acc_train_lr}')
+print(f'Em teste: {acc_test_rf}')
+print(f'Diferença Treino x Teste: {acc_train_lr - acc_test_rf}')
+
+auc_train_lr = roc_auc_score(y_train, y_proba_train[:,1])
+auc_test_lr = roc_auc_score(y_test, y_proba_test[:,1])
+
+print('ROC AUC')
+print('=' * 30)
+print(f'Em treino: {auc_train_lr}')
+print(f'Em teste: {auc_test_lr}')
+print(f'Diferença Treino x Teste: {auc_train_lr - auc_test_lr}')
+
+curve = roc_curve(y_test, y_proba_test[:,1])
+
+fig, ax = plt.subplots(figsize = (12, 6))
+plt.plot(curve[0], curve[1])
+plt.plot([0, 1], [0, 1], '--')
+ax.set_title('LogisticRegression ROC Curve', loc = 'left', fontsize = 18, pad = 12)
+ax.set_xlabel('Falso positivo', fontsize = 8)
+ax.set_ylabel('Verdadeiro positivo', fontsize = 8)
+plt.show()
+
